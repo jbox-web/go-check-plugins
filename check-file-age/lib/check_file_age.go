@@ -2,7 +2,10 @@ package checkfileage
 
 import (
 	"fmt"
+	"math"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jessevdk/go-flags"
@@ -58,6 +61,48 @@ func newMonitor(warningAge, warningSize, criticalAge, criticalSize int64) *monit
 	}
 }
 
+func plural(count int, singular string) (result string) {
+	if (count == 1) || (count == 0) {
+		result = strconv.Itoa(count) + " " + singular + " "
+	} else {
+		result = strconv.Itoa(count) + " " + singular + "s "
+	}
+	return
+}
+
+func secondsToHuman(input int64) (result string) {
+	years := math.Floor(float64(input) / 60 / 60 / 24 / 7 / 30 / 12)
+	seconds := input % (60 * 60 * 24 * 7 * 30 * 12)
+	months := math.Floor(float64(seconds) / 60 / 60 / 24 / 7 / 30)
+	seconds = input % (60 * 60 * 24 * 7 * 30)
+	weeks := math.Floor(float64(seconds) / 60 / 60 / 24 / 7)
+	seconds = input % (60 * 60 * 24 * 7)
+	days := math.Floor(float64(seconds) / 60 / 60 / 24)
+	seconds = input % (60 * 60 * 24)
+	hours := math.Floor(float64(seconds) / 60 / 60)
+	seconds = input % (60 * 60)
+	minutes := math.Floor(float64(seconds) / 60)
+	seconds = input % 60
+
+	if years > 0 {
+		result = plural(int(years), "year") + plural(int(months), "month") + plural(int(weeks), "week") + plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
+	} else if months > 0 {
+		result = plural(int(months), "month") + plural(int(weeks), "week") + plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
+	} else if weeks > 0 {
+		result = plural(int(weeks), "week") + plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
+	} else if days > 0 {
+		result = plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
+	} else if hours > 0 {
+		result = plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
+	} else if minutes > 0 {
+		result = plural(int(minutes), "minute") + plural(int(seconds), "second")
+	} else {
+		result = plural(int(seconds), "second")
+	}
+
+	return
+}
+
 var opts struct {
 	File          string `short:"f" long:"file" required:"true" description:"monitor file name"`
 	WarningAge    int64  `short:"w" long:"warning-age" default:"240" description:"warning if more old than"`
@@ -97,6 +142,7 @@ func run(args []string) *checkers.Checker {
 		result = checkers.CRITICAL
 	}
 
-	msg := fmt.Sprintf("%s is %d seconds old (%02d:%02d:%02d) and %d bytes.", opts.File, age, mtime.Hour(), mtime.Minute(), mtime.Second(), size)
+	duration := strings.TrimSpace(secondsToHuman(age))
+	msg := fmt.Sprintf("%s is %d seconds old (%s) and %d bytes.", opts.File, age, duration, size)
 	return checkers.NewChecker(result, msg)
 }

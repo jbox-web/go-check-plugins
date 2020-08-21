@@ -8,6 +8,7 @@ import (
 	"github.com/shirou/gopsutil/disk"
 	"io/ioutil"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -75,8 +76,17 @@ func getGlobalStatus(resultCheck map[string]result) checkers.Status {
 func buildFinalMessage(resultCheck map[string]result) string {
 	message := ""
 
-	for mount, result := range resultCheck {
-		message += fmt.Sprintf("\n%s: %s", mount, result.Message)
+	keys := make([]string, 0, len(resultCheck))
+
+	for k := range resultCheck {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		result := resultCheck[k]
+		message += fmt.Sprintf("\n%s: %s", k, result.Message)
 	}
 
 	return message

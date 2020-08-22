@@ -13,7 +13,8 @@ import (
 )
 
 var opts struct {
-	WriteTest bool `short:"w" long:"write-test" description:"run write test"`
+	WriteTest   bool     `short:"w" long:"write-test" description:"run write test"`
+	MountPoints []string `short:"m" description:"list of mountpoints to check. Can be repeated multiple times"`
 }
 
 type result struct {
@@ -76,7 +77,7 @@ func getGlobalStatus(resultCheck map[string]result) checkers.Status {
 }
 
 func buildFinalMessage(resultCheck map[string]result) string {
-	message := ""
+	message := "\n"
 
 	keys := make([]string, 0, len(resultCheck))
 
@@ -94,30 +95,57 @@ func buildFinalMessage(resultCheck map[string]result) string {
 	return message
 }
 
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}
+
+func extractNFSEntry(fstab fstab.Mounts) []string {
+	keys := make([]string, 0, len(fstab))
+
+	for _, fstabEntry := range fstab {
+		if fstabEntry.IsNFS() {
+			keys = append(keys, fstabEntry.File)
+		} else {
+			continue
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func run(args []string) *checkers.Checker {
-	_, err := flags.ParseArgs(&opts, args)
+	args, err := flags.ParseArgs(&opts, args)
 	if err != nil {
 		os.Exit(1)
 	}
+
+	mounts := opts.MountPoints
 
 	disks, err := disk.Partitions(true)
 	if err != nil {
 		return checkers.Unknown(fmt.Sprintf("Failed to fetch disks info: %s", err))
 	}
 
+	nfsHash := buildNFSHash(disks)
+
 	fstab, err := fstab.ParseSystem()
 	if err != nil {
 		return checkers.Unknown(fmt.Sprintf("Failed to fetch fstab info: %s", err))
 	}
 
-	nfsHash := buildNFSHash(disks)
+	nfsFstab := extractNFSEntry(fstab)
 
 	var resultCheck map[string]result
 	resultCheck = make(map[string]result)
 
-	for _, fstabEntry := range fstab {
-		if fstabEntry.IsNFS() {
-			if mount, ok := nfsHash[fstabEntry.File]; ok {
+	for _, entry := range mounts {
+		if contains(nfsFstab, entry) {
+			if mount, ok := nfsHash[entry]; ok {
 				message := ""
 				var status checkers.Status
 
@@ -132,22 +160,22 @@ func run(args []string) *checkers.Checker {
 							tmpfile, err := ioutil.TempFile(mount.Mountpoint, "checkmountpoints")
 
 							if err != nil {
-								message += fmt.Sprintf("Path not writable (step: create file)")
+								message += fmt.Sprintf("Path mounted as rw but not writable (step: create file)")
 								status = checkers.CRITICAL
 							} else {
 								if _, err := tmpfile.Write(content); err != nil {
-									message += fmt.Sprintf("Path not writable (step: write file)")
+									message += fmt.Sprintf("Path mounted as rw but not writable (step: write file)")
 									status = checkers.CRITICAL
 								} else {
 									if err := tmpfile.Close(); err != nil {
-										message += fmt.Sprintf("Path not writable (step: close file)")
+										message += fmt.Sprintf("Path mounted as rw but not writable (step: close file)")
 										status = checkers.CRITICAL
 									} else {
 										if err := os.Remove(tmpfile.Name()); err != nil {
-											message += fmt.Sprintf("Path not writable (step: remove file)")
+											message += fmt.Sprintf("Path mounted as rw but not writable (step: remove file)")
 											status = checkers.CRITICAL
 										} else {
-											message += fmt.Sprintf("Path is writable")
+											message += fmt.Sprintf("Path mounted as rw and writable")
 											status = checkers.OK
 										}
 									}
@@ -164,7 +192,11 @@ func run(args []string) *checkers.Checker {
 				resultCheck[mount.Mountpoint] = result{Message: message, Status: status}
 			}
 		} else {
-			continue
+			message := ""
+			var status checkers.Status
+			message += fmt.Sprintf("Path not found in fstab")
+			status = checkers.UNKNOWN
+			resultCheck[entry] = result{Message: message, Status: status}
 		}
 	}
 

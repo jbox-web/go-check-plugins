@@ -12,7 +12,9 @@ import (
 	"strings"
 )
 
-var opts struct{}
+var opts struct {
+	WriteTest bool `short:"w" long:"write-test" description:"run write test"`
+}
 
 type result struct {
 	Message string
@@ -125,30 +127,34 @@ func run(args []string) *checkers.Checker {
 				} else {
 					parsedOptions := parseOptions(mount.Opts)
 					if _, ok := parsedOptions["rw"]; ok {
-						content := []byte("temporary file's content")
-						tmpfile, err := ioutil.TempFile(mount.Mountpoint, "checkmountpoints")
+						if opts.WriteTest {
+							content := []byte("temporary file's content")
+							tmpfile, err := ioutil.TempFile(mount.Mountpoint, "checkmountpoints")
 
-						if err != nil {
-							message += fmt.Sprintf("Path not writable (step: create file)")
-							status = checkers.CRITICAL
-						} else {
-							if _, err := tmpfile.Write(content); err != nil {
-								message += fmt.Sprintf("Path not writable (step: write file)")
+							if err != nil {
+								message += fmt.Sprintf("Path not writable (step: create file)")
 								status = checkers.CRITICAL
 							} else {
-								if err := tmpfile.Close(); err != nil {
-									message += fmt.Sprintf("Path not writable (step: close file)")
+								if _, err := tmpfile.Write(content); err != nil {
+									message += fmt.Sprintf("Path not writable (step: write file)")
 									status = checkers.CRITICAL
 								} else {
-									if err := os.Remove(tmpfile.Name()); err != nil {
-										message += fmt.Sprintf("Path not writable (step: remove file)")
+									if err := tmpfile.Close(); err != nil {
+										message += fmt.Sprintf("Path not writable (step: close file)")
 										status = checkers.CRITICAL
 									} else {
-										message += fmt.Sprintf("Path is writable")
-										status = checkers.OK
+										if err := os.Remove(tmpfile.Name()); err != nil {
+											message += fmt.Sprintf("Path not writable (step: remove file)")
+											status = checkers.CRITICAL
+										} else {
+											message += fmt.Sprintf("Path is writable")
+											status = checkers.OK
+										}
 									}
 								}
 							}
+						} else {
+							message += fmt.Sprintf("Path mounted as rw but not tested")
 						}
 					} else {
 						message += fmt.Sprintf("Path mounted as ro")

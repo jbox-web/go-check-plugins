@@ -87,9 +87,13 @@ func buildFinalMessage(resultCheck map[string]result) string {
 
 	sort.Strings(keys)
 
+	l := longest(keys)[0]
+	maxLength := len(l)
+
 	for _, k := range keys {
 		result := resultCheck[k]
-		message += fmt.Sprintf("\n%s: %s", k, result.Message)
+		padding := (maxLength - len(k)) + 1
+		message += fmt.Sprintf("\n%s%-*s: %s", k, padding, " ", result.Message)
 	}
 
 	return message
@@ -102,6 +106,24 @@ func contains(s []string, e string) bool {
 		}
 	}
 	return false
+}
+
+// See: https://stackoverflow.com/a/54832590
+func longest(a []string) []string {
+	var l []string
+	if len(a) > 0 {
+		l = append(l, a[0])
+		a = a[1:]
+	}
+	for _, s := range a {
+		if len(l[0]) <= len(s) {
+			if len(l[0]) < len(s) {
+				l = l[:0]
+			}
+			l = append(l, s)
+		}
+	}
+	return append([]string(nil), l...)
 }
 
 func extractNFSEntry(fstab fstab.Mounts) []string {

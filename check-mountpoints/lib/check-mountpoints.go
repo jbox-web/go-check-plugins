@@ -190,6 +190,12 @@ func run(args []string) *checkers.Checker {
 				}
 
 				resultCheck[mount.Mountpoint] = result{Message: message, Status: status}
+			} else {
+				message := ""
+				var status checkers.Status
+				message += fmt.Sprintf("Path not mounted")
+				status = checkers.CRITICAL
+				resultCheck[entry] = result{Message: message, Status: status}
 			}
 		} else {
 			message := ""

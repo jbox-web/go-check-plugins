@@ -2,9 +2,9 @@ package checkmountpoints
 
 import (
 	"fmt"
+	"github.com/d-tux/go-fstab"
 	"github.com/jessevdk/go-flags"
 	"github.com/mackerelio/checkers"
-	"github.com/n-rodriguez/go-fstab"
 	"github.com/shirou/gopsutil/disk"
 	"io/ioutil"
 	"os"

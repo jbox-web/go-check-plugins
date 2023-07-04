@@ -72,23 +72,11 @@ func checkReplication(args []string) *checkers.Checker {
 	}
 	defer db.Close()
 
-	mySQLVersion, err := getMySQLVersion(db)
-	if err != nil {
-		return checkers.Unknown(fmt.Sprintf("Couldn't get MySQL Version: %s", err))
-	}
-
-	// MySQL > 8.0.22 supports `SHOW REPLICA STATUS`
-	replicaSupport := !(mySQLVersion.major < 8 || (mySQLVersion.major == 8 && mySQLVersion.minor == 0 && mySQLVersion.patch < 22))
-
 	sqlxDb := sqlx.NewDb(db, "mysql")
 	defer sqlxDb.Close()
 
 	var queryShowStatus string
-	if replicaSupport {
-		queryShowStatus = "SHOW REPLICA STATUS"
-	} else {
-		queryShowStatus = "SHOW SLAVE STATUS"
-	}
+	queryShowStatus = "SHOW SLAVE STATUS"
 
 	// Ignore columns which does not exist in structs.
 	rows, err := sqlxDb.Unsafe().Queryx(queryShowStatus)
@@ -102,11 +90,8 @@ func checkReplication(args []string) *checkers.Checker {
 	}
 
 	var status status
-	if replicaSupport {
-		status = &replicationStatus{}
-	} else {
-		status = &slaveStatus{}
-	}
+	status = &slaveStatus{}
+
 	err = rows.StructScan(status)
 	if err != nil {
 		return checkers.Unknown(fmt.Sprintf("Couldn't scan row: %s", err))

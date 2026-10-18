@@ -18,11 +18,11 @@ func checkReadOnly(args []string) *checkers.Checker {
 	psr.Usage = "readonly [OPTIONS] [ON|OFF]"
 	args, err := psr.ParseArgs(args)
 	if err != nil {
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 	if len(args) != 1 {
 		fmt.Println("wrong number of arguments")
-		os.Exit(1)
+		os.Exit(int(checkers.UNKNOWN))
 	}
 	argStatus := args[0]
 

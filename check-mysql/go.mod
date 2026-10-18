@@ -1,13 +1,15 @@
 module github.com/jbox-web/go-check-plugins/check-mysql
 
-go 1.20
+go 1.27
 
 require (
-	github.com/go-sql-driver/mysql v1.7.1
-	github.com/jessevdk/go-flags v1.5.0
-	github.com/jmoiron/sqlx v1.3.5
-	github.com/mackerelio/checkers v0.0.4
-	github.com/mackerelio/go-check-plugins v0.44.0
+	github.com/go-sql-driver/mysql v1.10.1
+	github.com/jessevdk/go-flags v1.6.1
+	github.com/jmoiron/sqlx v1.4.0
+	github.com/mackerelio/checkers v0.2.1
 )
 
-require golang.org/x/sys v0.5.0 // indirect
+require (
+	filippo.io/edwards25519 v1.2.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+)

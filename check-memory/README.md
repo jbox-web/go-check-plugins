@@ -1,40 +1,33 @@
 # check-memory
 
-## Description
-Check system memory
-
+Checks the used memory percentage.
 
 ## Synopsis
-```
-check-memory
-```
-
-## Installation
-
-First, build this program.
 
 ```
-go get github.com/jbox-web/go-check-plugins/check-memory
-cd $(go env GOPATH)/src/github.com/jbox-web/go-check-plugins/check-memory
-make
+check-memory -w 95 -c 98
 ```
 
-Next, you can execute this program :-)
+## Options
 
 ```
-check-memory
+Usage:
+  check-memory [OPTIONS]
+
+Application Options:
+  -w, --warning=  Sets warning value for Memory Usage. Default is 95% (default:
+                  95)
+  -c, --critical= Sets critical value for Memory Usage. Default is 98%
+                  (default: 98)
 ```
 
-## Usage
+## Statuses
 
-### Options
+- OK below `--warning`, WARNING from `--warning`, CRITICAL from `--critical`
+  (percentages).
+- UNKNOWN when a threshold is not a number or the memory cannot be read.
 
-```
-  -w, --warning=  Sets warning value for Memory Usage. Default is 95% (default: 95)
-  -c, --critical= Sets critical value for Memory Usage. Default is 98% (default: 98)
-```
+## Build
 
-
-## For more information
-
-Please execute `check-memory -h` and you can get command line options.
+`make build` produces a static linux/amd64 binary named `check-memory`; `make test` runs
+the tests. See the [repository README](../README.md).

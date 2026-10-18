@@ -28,7 +28,7 @@ func checkUptime(args []string) *checkers.Checker {
 	psr.Usage = "uptime [OPTIONS]"
 	_, err := psr.ParseArgs(args)
 	if err != nil {
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 	db, err := newDB(opts.mysqlSetting)
 	if err != nil {

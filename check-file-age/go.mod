@@ -1,10 +1,10 @@
 module github.com/jbox-web/go-check-plugins/check-file-age
 
-go 1.20
+go 1.27
 
 require (
-	github.com/jessevdk/go-flags v1.5.0
-	github.com/mackerelio/checkers v0.0.4
+	github.com/jessevdk/go-flags v1.6.1
+	github.com/mackerelio/checkers v0.2.1
 )
 
-require golang.org/x/sys v0.0.0-20210320140829-1e4c9ba3b0c4 // indirect
+require golang.org/x/sys v0.49.0 // indirect

@@ -1,47 +1,20 @@
 # check-file-age
 
-## Description
-
-Monitor file age and size for script monitoring.
+Checks the age and the size of a file, typically one a scheduled job rewrites.
 
 ## Synopsis
-```
-check-file-age -w 240 -W 10 -c 600 -C 0 -f /path/to/filename
-```
-
-## Installation
-
-First, build this program.
 
 ```
-go get github.com/mackerelio/go-check-plugins
-cd $(go env GOPATH)/src/github.com/mackerelio/go-check-plugins/check-file-age
-go install
+check-file-age -f /var/backups/last-run -w 240 -c 600 -C 1
 ```
 
-Or you can use this program by installing the official Mackerel package. See [Using the official check plugin pack for check monitoring - Mackerel Docs](https://mackerel.io/docs/entry/howto/mackerel-check-plugins).
-
-
-Next, you can execute this program :-)
+## Options
 
 ```
-check-file-age -w 240 -W 10 -c 600 -C 0 -f /path/to/filename
-```
+Usage:
+  check-file-age [OPTIONS]
 
-
-## Setting for mackerel-agent
-
-If there are no problems in the execution result, add a setting in mackerel-agent.conf .
-
-```
-[plugin.checks.fileage-sample]
-command = ["check-file-age", "-w", "240", "-W", "10", "-c", "600", "-C", "0", "-f", "/path/to/filename"]
-```
-
-## Usage
-### Options
-
-```
+Application Options:
   -f, --file=           monitor file name
   -w, --warning-age=    warning if more old than (default: 240)
   -W, --warning-size=   warning if file size less than
@@ -50,10 +23,14 @@ command = ["check-file-age", "-w", "240", "-W", "10", "-c", "600", "-C", "0", "-
   -i, --ignore-missing  skip alert if file doesn't exist
 ```
 
-## For more information
+## Statuses
 
-Please execute `check-file-age -h` and you can get command line options.
+- WARNING when the file is older than `--warning-age` seconds or smaller than
+  `--warning-size` bytes; CRITICAL likewise with the critical options. A size
+  threshold of 0 disables it.
+- UNKNOWN when the file cannot be read, OK instead with `--ignore-missing`.
 
-## Other
+## Build
 
-- inspired by [check_file_age.pl](https://github.com/nagios-plugins/nagios-plugins/blob/master/plugins-scripts/check_file_age.pl)
+`make build` produces a static linux/amd64 binary named `check-file-age`; `make test` runs
+the tests. See the [repository README](../README.md).

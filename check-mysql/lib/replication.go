@@ -16,30 +16,6 @@ type replicationOpts struct {
 	Warn int64 `short:"w" long:"warning" default:"200" description:"warning if the seconds behind master is over"`
 }
 
-type status interface {
-	ioRunning() string
-	sqlRunning() string
-	secondsBehind() sql.NullInt64
-}
-
-type replicationStatus struct {
-	ReplicaIORunning    string        `db:"Replica_IO_Running"`
-	ReplicaSQLRunning   string        `db:"Replica_SQL_Running"`
-	SecondsBehindSource sql.NullInt64 `db:"Seconds_Behind_Source"`
-}
-
-func (r *replicationStatus) ioRunning() string {
-	return r.ReplicaIORunning
-}
-
-func (r *replicationStatus) sqlRunning() string {
-	return r.ReplicaSQLRunning
-}
-
-func (r *replicationStatus) secondsBehind() sql.NullInt64 {
-	return r.SecondsBehindSource
-}
-
 type slaveStatus struct {
 	SlaveIORunning      string        `db:"Slave_IO_Running"`
 	SlaveSQLRunning     string        `db:"Slave_SQL_Running"`
@@ -64,7 +40,7 @@ func checkReplication(args []string) *checkers.Checker {
 	psr.Usage = "replication [OPTIONS]"
 	_, err := psr.ParseArgs(args)
 	if err != nil {
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 	db, err := newDB(opts.mysqlSetting)
 	if err != nil {
@@ -75,11 +51,9 @@ func checkReplication(args []string) *checkers.Checker {
 	sqlxDb := sqlx.NewDb(db, "mysql")
 	defer sqlxDb.Close()
 
-	var queryShowStatus string
-	queryShowStatus = "SHOW SLAVE STATUS"
-
-	// Ignore columns which does not exist in structs.
-	rows, err := sqlxDb.Unsafe().Queryx(queryShowStatus)
+	// MariaDB names it SHOW REPLICA STATUS only since 10.5.1; SHOW SLAVE STATUS
+	// works everywhere. Ignore columns which do not exist in the struct.
+	rows, err := sqlxDb.Unsafe().Queryx("SHOW SLAVE STATUS")
 	if err != nil {
 		return checkers.Unknown(fmt.Sprintf("Couldn't execute query: %s", err))
 	}
@@ -89,8 +63,7 @@ func checkReplication(args []string) *checkers.Checker {
 		return checkers.Ok("MySQL is not a replica")
 	}
 
-	var status status
-	status = &slaveStatus{}
+	status := &slaveStatus{}
 
 	err = rows.StructScan(status)
 	if err != nil {

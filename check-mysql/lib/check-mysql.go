@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/jessevdk/go-flags"
 	"github.com/mackerelio/checkers"
 )
 
@@ -22,12 +23,6 @@ type mysqlSetting struct {
 	EnableTLS     bool   `long:"tls" description:"Enables TLS connection"`
 	TLSRootCert   string `long:"tls-root-cert" default:"" description:"The root certificate used for TLS certificate verification"`
 	TLSSkipVerify bool   `long:"tls-skip-verify" description:"Disable TLS certificate verification"`
-}
-
-type mysqlVersion struct {
-	major int
-	minor int
-	patch int
 }
 
 var commands = map[string](func([]string) *checkers.Checker){
@@ -56,7 +51,7 @@ SubCommands:`)
 		for k := range commands {
 			fmt.Printf("  %s\n", k)
 		}
-		os.Exit(1)
+		os.Exit(int(checkers.UNKNOWN))
 	}
 	ckr := fn(argv)
 	ckr.Name = fmt.Sprintf("MySQL %s", strings.ToUpper(string(subCmd[0]))+subCmd[1:])
@@ -85,7 +80,9 @@ func newDB(m mysqlSetting) (*sql.DB, error) {
 			if err != nil {
 				return nil, fmt.Errorf("cannot read %s: %v", m.TLSRootCert, err)
 			}
-			certPool.AppendCertsFromPEM(pem)
+			if !certPool.AppendCertsFromPEM(pem) {
+				return nil, fmt.Errorf("no certificate found in %s", m.TLSRootCert)
+			}
 			c.RootCAs = certPool
 		}
 		c.InsecureSkipVerify = m.TLSSkipVerify
@@ -96,23 +93,11 @@ func newDB(m mysqlSetting) (*sql.DB, error) {
 	return sql.Open("mysql", cfg.FormatDSN())
 }
 
-func getMySQLVersion(db *sql.DB) (*mysqlVersion, error) {
-	var rawVersion string
-	err := db.QueryRow("SELECT VERSION()").Scan(&rawVersion)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to query SELECT VERSION(): %s", err)
+// exitCode turns a flag parsing failure into the plugin's exit code: 0 for
+// --help, UNKNOWN for a bad command line (exit 1 would read as WARNING).
+func exitCode(err error) int {
+	if flags.WroteHelp(err) {
+		return 0
 	}
-
-	// Version example: 5.5.44-0+deb8u1-log
-	var major, minor, patch int
-	_, err = fmt.Sscanf(rawVersion, "%d.%d.%d", &major, &minor, &patch)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to parse version: %s", err)
-	}
-
-	return &mysqlVersion{
-		major: major,
-		minor: minor,
-		patch: patch,
-	}, nil
+	return int(checkers.UNKNOWN)
 }

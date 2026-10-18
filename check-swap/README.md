@@ -1,40 +1,33 @@
 # check-swap
 
-## Description
-Check system swap
-
+Checks the used swap percentage.
 
 ## Synopsis
-```
-check-swap
-```
-
-## Installation
-
-First, build this program.
 
 ```
-go get github.com/jbox-web/go-check-plugins/check-swap
-cd $(go env GOPATH)/src/github.com/jbox-web/go-check-plugins/check-swap
-make
+check-swap -w 95 -c 98
 ```
 
-Next, you can execute this program :-)
+## Options
 
 ```
-check-swap
+Usage:
+  check-swap [OPTIONS]
+
+Application Options:
+  -w, --warning=  Sets warning value for Swap Usage. Default is 95% (default:
+                  95)
+  -c, --critical= Sets critical value for Swap Usage. Default is 98% (default:
+                  98)
 ```
 
-## Usage
+## Statuses
 
-### Options
+- OK below `--warning`, WARNING from `--warning`, CRITICAL from `--critical`
+  (percentages).
+- UNKNOWN when a threshold is not a number or the swap cannot be read.
 
-```
-  -w, --warning=  Sets warning value for Swap Usage. Default is 95% (default: 95)
-  -c, --critical= Sets critical value for Swap Usage. Default is 98% (default: 98)
-```
+## Build
 
-
-## For more information
-
-Please execute `check-swap -h` and you can get command line options.
+`make build` produces a static linux/amd64 binary named `check-swap`; `make test` runs
+the tests. See the [repository README](../README.md).

@@ -2,19 +2,21 @@ package checkmountpoints
 
 import (
 	"fmt"
-	"github.com/d-tux/go-fstab"
-	"github.com/jessevdk/go-flags"
-	"github.com/mackerelio/checkers"
-	"github.com/shirou/gopsutil/disk"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/d-tux/go-fstab"
+	"github.com/jessevdk/go-flags"
+	"github.com/mackerelio/checkers"
+	"github.com/shirou/gopsutil/v4/disk"
 )
 
 var opts struct {
 	WriteTest   bool     `short:"w" long:"write-test" description:"run write test"`
 	MountPoints []string `short:"m" description:"list of mountpoints to check. Can be repeated multiple times"`
+	Timeout     float64  `short:"t" long:"timeout" default:"10" description:"Seconds before a mountpoint that does not answer is reported CRITICAL"`
 }
 
 type result struct {
@@ -29,74 +31,165 @@ func Do() {
 	ckr.Exit()
 }
 
+// buildNFSHash indexes the mounted NFS partitions (v3 and v4) by mountpoint.
 func buildNFSHash(disks []disk.PartitionStat) map[string]disk.PartitionStat {
-	var partitionsHash map[string]disk.PartitionStat
-	partitionsHash = make(map[string]disk.PartitionStat)
+	partitionsHash := make(map[string]disk.PartitionStat)
 
-	for _, disk := range disks {
-		if disk.Fstype == "nfs4" {
-			partitionsHash[disk.Mountpoint] = disk
-		} else {
-			continue
+	for _, d := range disks {
+		if d.Fstype == "nfs" || d.Fstype == "nfs4" {
+			partitionsHash[d.Mountpoint] = d
 		}
 	}
 
 	return partitionsHash
 }
 
-func parseOptions(opts string) map[string]string {
-	var parsedOptions map[string]string
-	parsedOptions = make(map[string]string)
+// parseOptions maps mount options to their value, "true" for bare flags.
+// gopsutil v4 already splits the options list.
+func parseOptions(opts []string) map[string]string {
+	parsedOptions := make(map[string]string)
 
-	splitOpts := strings.Split(opts, ",")
-
-	for _, opt := range splitOpts {
-		splitOpt := strings.Split(opt, "=")
-		if len(splitOpt) == 1 {
-			parsedOptions[splitOpt[0]] = "true"
-		} else {
-			parsedOptions[splitOpt[0]] = splitOpt[1]
+	for _, opt := range opts {
+		key, value, found := strings.Cut(opt, "=")
+		if !found {
+			value = "true"
 		}
+		parsedOptions[key] = value
 	}
 
 	return parsedOptions
 }
 
+// getGlobalStatus returns the worst status: CRITICAL, then UNKNOWN, then OK.
 func getGlobalStatus(resultCheck map[string]result) checkers.Status {
-	var globalStatus checkers.Status
-	globalStatus = checkers.OK
+	globalStatus := checkers.OK
 
-	for _, result := range resultCheck {
-		if result.Status == checkers.CRITICAL {
-			globalStatus = checkers.CRITICAL
-			break
+	for _, r := range resultCheck {
+		switch r.Status {
+		case checkers.CRITICAL:
+			return checkers.CRITICAL
+		case checkers.UNKNOWN:
+			globalStatus = checkers.UNKNOWN
 		}
 	}
 
 	return globalStatus
 }
 
+// buildFinalMessage lists one result per mountpoint, sorted, colons aligned.
 func buildFinalMessage(resultCheck map[string]result) string {
 	message := "\n"
 
 	keys := make([]string, 0, len(resultCheck))
-
+	maxLength := 0
 	for k := range resultCheck {
 		keys = append(keys, k)
+		maxLength = max(maxLength, len(k))
 	}
 
 	sort.Strings(keys)
 
-	l := longest(keys)[0]
-	maxLength := len(l)
-
 	for _, k := range keys {
-		result := resultCheck[k]
 		padding := (maxLength - len(k)) + 1
-		message += fmt.Sprintf("\n%s%-*s: %s", k, padding, " ", result.Message)
+		message += fmt.Sprintf("\n%s%-*s: %s", k, padding, " ", resultCheck[k].Message)
 	}
 
 	return message
+}
+
+func extractNFSEntry(mounts fstab.Mounts) []string {
+	keys := make([]string, 0, len(mounts))
+
+	for _, fstabEntry := range mounts {
+		// go-fstab's IsNFS() only matches "nfs", not "nfs4".
+		if fstabEntry.VfsType == "nfs" || fstabEntry.VfsType == "nfs4" {
+			keys = append(keys, fstabEntry.File)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// writeTest creates, writes, closes and removes a file in dir, and reports
+// the first step that fails.
+func writeTest(dir string) result {
+	tmpfile, err := os.CreateTemp(dir, "checkmountpoints")
+	if err != nil {
+		return result{"Path mounted as rw but not writable (step: create file)", checkers.CRITICAL}
+	}
+	if _, err := tmpfile.Write([]byte("temporary file's content")); err != nil {
+		tmpfile.Close()
+		os.Remove(tmpfile.Name())
+		return result{"Path mounted as rw but not writable (step: write file)", checkers.CRITICAL}
+	}
+	if err := tmpfile.Close(); err != nil {
+		os.Remove(tmpfile.Name())
+		return result{"Path mounted as rw but not writable (step: close file)", checkers.CRITICAL}
+	}
+	if err := os.Remove(tmpfile.Name()); err != nil {
+		return result{"Path mounted as rw but not writable (step: remove file)", checkers.CRITICAL}
+	}
+	return result{"Path mounted as rw and writable", checkers.OK}
+}
+
+// checkMount checks one mountpoint that is both in fstab and mounted.
+func checkMount(mount disk.PartitionStat, write bool) result {
+	if _, err := os.Stat(mount.Mountpoint); os.IsNotExist(err) {
+		return result{"Path does not exist", checkers.CRITICAL}
+	} else if err != nil {
+		return result{fmt.Sprintf("Path not accessible: %s", err), checkers.CRITICAL}
+	}
+	if _, ok := parseOptions(mount.Opts)["rw"]; !ok {
+		return result{"Path mounted as ro", checkers.OK}
+	}
+	if !write {
+		return result{"Path mounted as rw but not tested", checkers.OK}
+	}
+	return writeTest(mount.Mountpoint)
+}
+
+func run(args []string) *checkers.Checker {
+	if _, err := flags.ParseArgs(&opts, args); err != nil {
+		os.Exit(exitCode(err))
+	}
+
+	if len(opts.MountPoints) == 0 {
+		return checkers.Unknown("No mountpoint to check: pass at least one -m")
+	}
+
+	disks, err := disk.Partitions(true)
+	if err != nil {
+		return checkers.Unknown(fmt.Sprintf("Failed to fetch disks info: %s", err))
+	}
+
+	nfsHash := buildNFSHash(disks)
+
+	mounts, err := fstab.ParseSystem()
+	if err != nil {
+		return checkers.Unknown(fmt.Sprintf("Failed to fetch fstab info: %s", err))
+	}
+
+	nfsFstab := extractNFSEntry(mounts)
+
+	resultCheck := make(map[string]result)
+
+	for _, entry := range opts.MountPoints {
+		if !contains(nfsFstab, entry) {
+			resultCheck[entry] = result{"Path not found in fstab", checkers.UNKNOWN}
+			continue
+		}
+		mount, ok := nfsHash[entry]
+		if !ok {
+			resultCheck[entry] = result{"Path not mounted", checkers.CRITICAL}
+			continue
+		}
+		timeout := time.Duration(opts.Timeout * float64(time.Second))
+		resultCheck[mount.Mountpoint] = withTimeout(timeout, func() result {
+			return checkMount(mount, opts.WriteTest)
+		})
+	}
+
+	return checkers.NewChecker(getGlobalStatus(resultCheck), buildFinalMessage(resultCheck))
 }
 
 func contains(s []string, e string) bool {
@@ -108,128 +201,25 @@ func contains(s []string, e string) bool {
 	return false
 }
 
-// See: https://stackoverflow.com/a/54832590
-func longest(a []string) []string {
-	var l []string
-	if len(a) > 0 {
-		l = append(l, a[0])
-		a = a[1:]
+// withTimeout runs fn, giving up after d: a hard NFS mount whose server is
+// gone blocks stat and write calls forever. The blocked goroutine is left
+// behind; the plugin exits right after.
+func withTimeout(d time.Duration, fn func() result) result {
+	done := make(chan result, 1)
+	go func() { done <- fn() }()
+	select {
+	case r := <-done:
+		return r
+	case <-time.After(d):
+		return result{fmt.Sprintf("Path not responding after %s", d), checkers.CRITICAL}
 	}
-	for _, s := range a {
-		if len(l[0]) <= len(s) {
-			if len(l[0]) < len(s) {
-				l = l[:0]
-			}
-			l = append(l, s)
-		}
-	}
-	return append([]string(nil), l...)
 }
 
-func extractNFSEntry(fstab fstab.Mounts) []string {
-	keys := make([]string, 0, len(fstab))
-
-	for _, fstabEntry := range fstab {
-		if fstabEntry.IsNFS() {
-			keys = append(keys, fstabEntry.File)
-		} else {
-			continue
-		}
+// exitCode turns a flag parsing failure into the plugin's exit code: 0 for
+// --help, UNKNOWN for a bad command line (exit 1 would read as WARNING).
+func exitCode(err error) int {
+	if flags.WroteHelp(err) {
+		return 0
 	}
-	sort.Strings(keys)
-	return keys
-}
-
-func run(args []string) *checkers.Checker {
-	args, err := flags.ParseArgs(&opts, args)
-	if err != nil {
-		os.Exit(1)
-	}
-
-	mounts := opts.MountPoints
-
-	disks, err := disk.Partitions(true)
-	if err != nil {
-		return checkers.Unknown(fmt.Sprintf("Failed to fetch disks info: %s", err))
-	}
-
-	nfsHash := buildNFSHash(disks)
-
-	fstab, err := fstab.ParseSystem()
-	if err != nil {
-		return checkers.Unknown(fmt.Sprintf("Failed to fetch fstab info: %s", err))
-	}
-
-	nfsFstab := extractNFSEntry(fstab)
-
-	var resultCheck map[string]result
-	resultCheck = make(map[string]result)
-
-	for _, entry := range mounts {
-		if contains(nfsFstab, entry) {
-			if mount, ok := nfsHash[entry]; ok {
-				message := ""
-				var status checkers.Status
-
-				if _, err := os.Stat(mount.Mountpoint); os.IsNotExist(err) {
-					message += fmt.Sprintf("Path does not exist")
-					status = checkers.CRITICAL
-				} else {
-					parsedOptions := parseOptions(mount.Opts)
-					if _, ok := parsedOptions["rw"]; ok {
-						if opts.WriteTest {
-							content := []byte("temporary file's content")
-							tmpfile, err := ioutil.TempFile(mount.Mountpoint, "checkmountpoints")
-
-							if err != nil {
-								message += fmt.Sprintf("Path mounted as rw but not writable (step: create file)")
-								status = checkers.CRITICAL
-							} else {
-								if _, err := tmpfile.Write(content); err != nil {
-									message += fmt.Sprintf("Path mounted as rw but not writable (step: write file)")
-									status = checkers.CRITICAL
-								} else {
-									if err := tmpfile.Close(); err != nil {
-										message += fmt.Sprintf("Path mounted as rw but not writable (step: close file)")
-										status = checkers.CRITICAL
-									} else {
-										if err := os.Remove(tmpfile.Name()); err != nil {
-											message += fmt.Sprintf("Path mounted as rw but not writable (step: remove file)")
-											status = checkers.CRITICAL
-										} else {
-											message += fmt.Sprintf("Path mounted as rw and writable")
-											status = checkers.OK
-										}
-									}
-								}
-							}
-						} else {
-							message += fmt.Sprintf("Path mounted as rw but not tested")
-						}
-					} else {
-						message += fmt.Sprintf("Path mounted as ro")
-					}
-				}
-
-				resultCheck[mount.Mountpoint] = result{Message: message, Status: status}
-			} else {
-				message := ""
-				var status checkers.Status
-				message += fmt.Sprintf("Path not mounted")
-				status = checkers.CRITICAL
-				resultCheck[entry] = result{Message: message, Status: status}
-			}
-		} else {
-			message := ""
-			var status checkers.Status
-			message += fmt.Sprintf("Path not found in fstab")
-			status = checkers.UNKNOWN
-			resultCheck[entry] = result{Message: message, Status: status}
-		}
-	}
-
-	globalStatus := getGlobalStatus(resultCheck)
-	globalMessage := buildFinalMessage(resultCheck)
-
-	return checkers.NewChecker(globalStatus, globalMessage)
+	return int(checkers.UNKNOWN)
 }

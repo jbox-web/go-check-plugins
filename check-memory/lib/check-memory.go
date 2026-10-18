@@ -2,12 +2,13 @@ package checkmemory
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+
 	"github.com/dustin/go-humanize"
 	"github.com/jessevdk/go-flags"
 	"github.com/mackerelio/checkers"
-	"github.com/shirou/gopsutil/mem"
-	"os"
-	"strconv"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 var opts struct {
@@ -22,10 +23,33 @@ func Do() {
 	ckr.Exit()
 }
 
+// checkStatus compares the used percentage with the warning and critical
+// thresholds, given as the raw command-line strings.
+func checkStatus(usedPercent float64, warning, critical string) (checkers.Status, error) {
+	warnThreshold, err := strconv.ParseFloat(warning, 64)
+	if err != nil {
+		return checkers.UNKNOWN, fmt.Errorf("invalid warning threshold %q: %w", warning, err)
+	}
+	critThreshold, err := strconv.ParseFloat(critical, 64)
+	if err != nil {
+		return checkers.UNKNOWN, fmt.Errorf("invalid critical threshold %q: %w", critical, err)
+	}
+
+	// Critical first: a usage above the critical threshold is above the
+	// warning one too.
+	switch {
+	case usedPercent >= critThreshold:
+		return checkers.CRITICAL, nil
+	case usedPercent >= warnThreshold:
+		return checkers.WARNING, nil
+	}
+	return checkers.OK, nil
+}
+
 func run(args []string) *checkers.Checker {
 	_, err := flags.ParseArgs(&opts, args)
 	if err != nil {
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 
 	memory, err := mem.VirtualMemory()
@@ -33,17 +57,9 @@ func run(args []string) *checkers.Checker {
 		return checkers.Unknown(fmt.Sprintf("Failed to fetch memory info: %s", err))
 	}
 
-	var checkState checkers.Status
-
-	warnThreshold, err := strconv.ParseFloat(opts.Warning, 64)
-	critThreshold, err := strconv.ParseFloat(opts.Critical, 64)
-
-	if memory.UsedPercent >= warnThreshold {
-		checkState = checkers.WARNING
-	} else if memory.UsedPercent >= critThreshold {
-		checkState = checkers.CRITICAL
-	} else {
-		checkState = checkers.OK
+	checkState, err := checkStatus(memory.UsedPercent, opts.Warning, opts.Critical)
+	if err != nil {
+		return checkers.Unknown(err.Error())
 	}
 
 	total := humanize.Bytes(memory.Total)
@@ -53,4 +69,13 @@ func run(args []string) *checkers.Checker {
 
 	message := fmt.Sprintf("Total: %s - Used: %s (%s%%) - Free: %s", total, used, percent, free)
 	return checkers.NewChecker(checkState, message)
+}
+
+// exitCode turns a flag parsing failure into the plugin's exit code: 0 for
+// --help, UNKNOWN for a bad command line (exit 1 would read as WARNING).
+func exitCode(err error) int {
+	if flags.WroteHelp(err) {
+		return 0
+	}
+	return int(checkers.UNKNOWN)
 }

@@ -2,7 +2,6 @@ package checkfileage
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -70,36 +69,34 @@ func plural(count int, singular string) (result string) {
 	return
 }
 
+// Durations used to break an age down, largest first: a month is 30 days and
+// a year 365 days.
+var units = []struct {
+	name    string
+	seconds int64
+}{
+	{"year", 365 * 24 * 3600},
+	{"month", 30 * 24 * 3600},
+	{"week", 7 * 24 * 3600},
+	{"day", 24 * 3600},
+	{"hour", 3600},
+	{"minute", 60},
+	{"second", 1},
+}
+
+// secondsToHuman spells an age out, from its largest non-zero unit down to
+// seconds, e.g. "1 hour 0 minute 5 seconds ".
 func secondsToHuman(input int64) (result string) {
-	years := math.Floor(float64(input) / 60 / 60 / 24 / 7 / 30 / 12)
-	seconds := input % (60 * 60 * 24 * 7 * 30 * 12)
-	months := math.Floor(float64(seconds) / 60 / 60 / 24 / 7 / 30)
-	seconds = input % (60 * 60 * 24 * 7 * 30)
-	weeks := math.Floor(float64(seconds) / 60 / 60 / 24 / 7)
-	seconds = input % (60 * 60 * 24 * 7)
-	days := math.Floor(float64(seconds) / 60 / 60 / 24)
-	seconds = input % (60 * 60 * 24)
-	hours := math.Floor(float64(seconds) / 60 / 60)
-	seconds = input % (60 * 60)
-	minutes := math.Floor(float64(seconds) / 60)
-	seconds = input % 60
-
-	if years > 0 {
-		result = plural(int(years), "year") + plural(int(months), "month") + plural(int(weeks), "week") + plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
-	} else if months > 0 {
-		result = plural(int(months), "month") + plural(int(weeks), "week") + plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
-	} else if weeks > 0 {
-		result = plural(int(weeks), "week") + plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
-	} else if days > 0 {
-		result = plural(int(days), "day") + plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
-	} else if hours > 0 {
-		result = plural(int(hours), "hour") + plural(int(minutes), "minute") + plural(int(seconds), "second")
-	} else if minutes > 0 {
-		result = plural(int(minutes), "minute") + plural(int(seconds), "second")
-	} else {
-		result = plural(int(seconds), "second")
+	remaining := input
+	started := false
+	for _, u := range units {
+		count := remaining / u.seconds
+		remaining %= u.seconds
+		if count > 0 || started || u.name == "second" {
+			started = true
+			result += plural(int(count), u.name)
+		}
 	}
-
 	return
 }
 
@@ -115,7 +112,7 @@ var opts struct {
 func run(args []string) *checkers.Checker {
 	_, err := flags.ParseArgs(&opts, args)
 	if err != nil {
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 
 	stat, err := os.Stat(opts.File)
@@ -145,4 +142,13 @@ func run(args []string) *checkers.Checker {
 	duration := strings.TrimSpace(secondsToHuman(age))
 	msg := fmt.Sprintf("%s is %d seconds old (%s) and %d bytes.", opts.File, age, duration, size)
 	return checkers.NewChecker(result, msg)
+}
+
+// exitCode turns a flag parsing failure into the plugin's exit code: 0 for
+// --help, UNKNOWN for a bad command line (exit 1 would read as WARNING).
+func exitCode(err error) int {
+	if flags.WroteHelp(err) {
+		return 0
+	}
+	return int(checkers.UNKNOWN)
 }
